@@ -55,3 +55,26 @@ accompanying acute respiratory distress syndrome, a serious complication of COVI
 flood with fluid, and which is associated with with a high mortality rate. We were unable to accurately
 predict length of stay using a suite of clinical characteristics, indicating that early strains of COVID-19 were
 complex and somewhat unpredictable in their clinical impact.
+
+## Conclusion:
+We investigated clinical outcomes for 819 individuals hospitalized with COVID-19 early in the pandemic,and
+found that in early 2020 COVID-19 infected people from all racial backgrounds while tending to cause more
+deaths among older individuals. Of the clinical characteristics measured, blood pressure and D-dimer differed
+among those who died from COVID-19 compared to those who lived, while temperature and WBC did not.
+Overall, this dataset provides valuable insight into the clinical outcomes of early COVID-19 in an urban
+US-based population.
+
+## Sources:
+[1] “COVID-19: Data: Trends and Totals.” Last updated December 7, 2023. https://www.nyc.gov/site/
+doh/covid/covid-19-data-totals.page
+
+[2] Altschul, David (2021). Neurologic complications of COVID-19 [Dataset]. Dryad. https://doi.org/10.
+5061/dryad.7d7wm37sz
+
+[3] “Morbidity and Mortality Weekly Report: COVID-19 Outbreak – New York City, February 29-June
+1, 2020.” Centers for Disease Control and Prevention. https://www.cdc.gov/mmwr/volumes/69/wr/
+mm6946a2.htm
+
+[4] “Antithrombotic Therapy in Patients with COVID-19.” COVID-19 Treatment Guidelines. National
+Institute of Health. Last updated October 10, 2023. https://www.covid19treatmentguidelines.nih.gov/
+therapies/antithrombotic-therapy/
