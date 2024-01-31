@@ -20,12 +20,14 @@ proportion of Black and Latino patients. Nevertheless, the ages of our patient c
 patients in NYC as a whole. Taken together, these findings could motivate hypotheses for further study,
 including (1) is the distribution of ages of residents in the communities surrounding these hospitals more
 similar to the distribution of ages in all of NYC as compared to the distribution of races?, and, (2) does
-SARS-CoV-2 selectively cause hospitalization-necessitating disease in older individuals, while being less ornot at all selective on the basis of race? Answering these questions would require expanding the study
+SARS-CoV-2 selectively cause hospitalization-necessitating disease in older individuals, while being less or not at all selective on the basis of race? Answering these questions would require expanding the study
 population beyond the hospital setting to survey individuals living in the community.
+
 Several different comorbidities were reported among this patient cohort. Surprisingly, neither COPD nor
 peripheral vascular disease were associated with patient death from COVID-19. Additionally, while dementia
 alone was not associated with patient death, there was an association between all central nervous system
 disorders and patient death from COVID-19.
+
 We could not accurately represent the relationship between age and COVID-19 severity score as age was a
 heavily weighted factor in calculating severity score for these patients. Rather, we investigated the effect
 of race on severity score and found that there was no difference in severity score when broken down by the
@@ -33,6 +35,7 @@ five different races represented in this study (Asian, Black, Latino, White, and
 both age and severity score were higher among those who died compared to those who lived, while length
 of stay in the hospital was rather evenly distributed among patients who lived and patients who died from
 COVID-19.
+
 We explored the impact of several different clinical characteristics on survival status among this cohort of
 patients. First, looking at temperature, we saw no difference in body temperature between patients who
 lived and died. We next investigated the measure of blood clotting, as measured by D-dimer levels, and
@@ -45,10 +48,8 @@ body). This evidence was important for guiding the clinical standard of care, wh
 anticoagulation for certain populations of individuals hospitalized with SARS-CoV-2 infection [4]. Lastly,
 we looked at blood pressure and found greater variance in blood pressure among those who died compared
 to those who lived. This may reflect a state of physiological decompensation among these patients which
-
 puts the patient’s life at risk. Causes of dysregulated blood pressure which may happen during SARS-
 CoV-2 infection include septic shock, which occurs when the body’s immune system generates a hyperactive
-
 response to the viral pathogen and which is life-threatening. Changes in blood pressure can also be seen
 accompanying acute respiratory distress syndrome, a serious complication of COVID-19 in which the lungs
 flood with fluid, and which is associated with with a high mortality rate. We were unable to accurately
