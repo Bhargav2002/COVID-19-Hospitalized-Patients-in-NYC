@@ -1,0 +1,1244 @@
+---
+title: "COVID-19 Hospitalized Patients in NYC"
+subtitle: "DSCC/CSC/TCS 462 Final Project"
+author: "Anna Kolstad, Bhargav Sai Bhuvanagiri, Jacob Crossett, Natalie Vance"
+date: "2023-12-14"
+output: pdf_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = T, eval=T,tidy=TRUE, tidy.opts=list(width.cutoff=60))
+# Load necessary libraries
+library(dplyr)
+library(ggplot2)
+library(MASS)
+library(moments)
+library(tidyverse)
+library(patchwork)
+library(psych)
+```
+
+# Introduction
+
+SARS-CoV-2 infection swept through New York City in early 2020 and has
+caused over 219,000 hospitalizations and over 45,000 deaths in the city
+since [1]. In this project, we examine a dataset published by David Altschul 
+from Montefiore Medical Center that characterizes hospitalization and death in 
+the early days of the pandemic in four hospitals in New York City and 
+Westchester County, among patients admitted to the hospital between March 1 
+and April 16, 2020 due to SARS-CoV-2 infection [2]. In total, this dataset 
+describes 4711 patients across 84 variables, including patient demographic 
+information, clinical presentation, medical history, clinical test results, and 
+patient survival. From this dataset, we investigated clinical outcomes for 819
+individuals hospitalized with COVID-19 early in the pandemic. We split
+this work into three different parts, first exploring the dataset and
+distributions of the variables we sought to use throughout the analysis.
+Second, we examined the survival status of the COVID-19 patients in this
+cohort. Lastly, we performed several inferential statistical tests to parse out
+which clinical measures are most useful in analyzing and predicting
+COVID-19 patient outcomes.
+
+# Methods
+
+We restricted our analysis to only those patients for whom all 84
+variables were recorded and for which feasible values existed for each
+variable. For example, we removed all patients from the dataset with
+negative values recorded for body temperature. After cleaning the data
+in this manner, we were left with 819 individual patients.
+
+## Import and Clean Dataset
+
+```{r importData, warning=FALSE}
+COVID.df <- read.csv("COVIDNeuroDataset.csv")
+```
+
+```{r cleanData, warning=FALSE}
+colNames <- colnames(COVID.df)
+colNames<- colNames[! colNames%in% c("Age","Race")]
+
+# Remove rows with 0 for any “Yes” variables and “LOS_Y”
+# Remove rows with non-feasible data values (e.g. negative values)
+COVID.df <- COVID.df %>% filter(if_all(contains("Yes"), ~ . > 0), if_all(ends_with("_Y"), ~ . > 0), if_all(all_of(colNames), ~ . >= 0))
+```
+
+```{r aggregateVariables, warning=FALSE}
+# Make 'Race' variable
+COVID.df <- COVID.df %>% mutate(Race = case_when(
+  Black == 1 ~ "Black",
+  White == 1 ~ "White",
+  Asian == 1 ~ "Asian",
+  Latino == 1 ~ "Latino",
+  TRUE ~ "Unknown"
+))
+
+# Make 'Died' variable
+COVID.df$Died <- ifelse(COVID.df$Death == 1, "Died", "Lived")
+
+# Make 'HasCOPD' variable
+COVID.df$HasCOPD <- ifelse(COVID.df$COPD == 1, "COPD", "No COPD")
+
+# Make 'HasDement’ variable
+COVID.df$HasDement <- ifelse(COVID.df$DEMENT == 1, "Dementia", "No Dementia")
+
+# Make 'Comorbidities' variable
+COVID.df  <- COVID.df %>% mutate(Comorbidities = case_when(
+  MI == 1 ~ "MI",
+  PVD == 1 ~ "PVD",
+  CHF == 1 ~ "CHF",
+  CVD == 1 ~ "CVD",
+  DEMENT == 1 ~ "DEMENT",
+  COPD == 1 ~ "COPD",
+  DM.Complicated == 1 ~ "DM, Complicated",
+  DM.Simple == 1 ~ "DM, Simple",
+  Renal.Disease == 1 ~ "Renal disease",
+  All.CNS == 1 ~ "Any CNS Issue",
+  Pure.CNS == 1 ~ "Pure CNS Issue",
+  Stroke == 1 ~ "Stroke",
+  Seizure == 1 ~ "Seizure",
+  OldSyncope == 1 ~ "Old Syncope",
+  TRUE ~ "Unknown"
+))
+
+# Segment patients by died vs. lived status
+died_data <- subset(COVID.df, Death == 1)
+alive_data <- subset(COVID.df,Death == 0)
+
+# Get individuals that died
+died.df <- COVID.df[COVID.df$Death == '1',]
+# Get individuals that lived
+lived.df <- COVID.df[COVID.df$Death == '0',]
+```
+
+# Part I: Patient Demographics
+
+We first explored patient demographics, focusing on race, age, and the
+presence of comorbidities.
+
+## Race
+
+```{r, warning=FALSE}
+# Create absolute frequency bar chart of race
+race_lables <- c("Asian","Black","Latino","Unknown","White")
+
+race <- ggplot(COVID.df, aes(x=Race, fill=Race)) + 
+  geom_bar() +
+  ggtitle("Absolute Frequency - Race") +
+  theme_bw()
+
+race + ylab("Count")
+```
+
+The race of the vast majority of patients is either Black or Latino.
+Additionally, about 150 patients do not have their race recorded.
+
+In 2020 the CDC reported the proportion of Black NYC residents who were
+hospitalized for COVID-19 as 0.2707 [3]. From this data, we wanted to
+see if our sample was representative of NYC as a whole and asked the
+question: does the true proportion of Black NYC residents who were
+hospitalized equal 0.2707, as is reported by the CDC?
+
+COVID-19 hospitalization total in NYC in 2020: 54,211
+
+COVID-19 hospitalization total of patients who are Black in 2020: 14,676
+
+Proportion of COVID-19 hospitalized patients in NYC in 2020 who are
+Black: 14,676 / 54,211 = 0.2707
+
+$$ \begin{aligned} H_0&: p = p_0 \\ &: \text{Proportion of patients hospitalized who are Black = 0.2707} \\ H_1&: p \ne p_0 \\ &: \text{Proportion of patients hospitalized who are Black} \ne 0.2707\\ \end{aligned} $$
+
+```{r, warning=FALSE}
+# Find number of patients who are Black
+BlackPatients <- COVID.df[COVID.df$Race == "Black", ]
+numBlackPatients <- nrow(BlackPatients)
+numBlackPatients
+
+# Get number of patients
+totalPatients <- nrow(COVID.df)
+
+prop.test(x = numBlackPatients, n = totalPatients, p = 0.2707, correct = FALSE)
+```
+
+From the one-sample proportion test, we get a p-value of 0.0043, which
+is less than our significance level of 0.05. Based on this sample, we
+reject the null hypothesis that the true proportion of Black NYC
+residents who were hospitalized in 2020 equals 0.2707, as was reported
+by the CDC.
+
+Further investigating the race distribution in our sample, we asked:
+does the true proportion of Latino NYC residents who were hospitalized
+equal 0.2820, as is reported by the CDC [3]?
+
+COVID-19 hospitalization total in NYC in 2020: 54,211
+
+COVID-19 hospitalization total in NYC of patients who are Latino in
+2020: 15,288
+
+Proportion of COVID-19 hospitalized patients in NYC in 2020 who are
+Latino: 15,288 / 54,211 = 0.2820
+
+$$ \begin{aligned} H_0&: p = p_0 \\ &: \text{Proportion of patients hospitalized who are Latino = 0.2820} \\ H_1&: p \ne p_0 \\ &: \text{Proportion of patients hospitalized who are Latino} \ne 0.2820\\ \end{aligned} $$
+
+```{r, warning=FALSE}
+# Find number of patients who are Latino
+LatinoPatients <- COVID.df[COVID.df$Race == "Latino", ]
+numLatinoPatients <- nrow(LatinoPatients)
+numLatinoPatients
+
+# Get number of patients
+totalPatients <- nrow(COVID.df)
+
+prop.test(x = numLatinoPatients, n = totalPatients, p = 0.2820, correct = FALSE)
+```
+
+Again using the one-sample proportion test, we get a p-value of
+$1.387*10^{-11}$ which is less than our alpha of 0.05. Based on evidence from this
+sample, we reject the null hypothesis that the true proportion of NYC
+residents hospitalized in 2020 who were Latino equals 0.2820, as was
+reported by the CDC. Howver, as we believe the CDC data is in fact of high 
+quality and is likely an accurate representation of the true population proportions, 
+rather than concluding that the CDC's values are wrong, we instead interpret this 
+discrepancy to mean that our particular sample may not be representative of the 
+greater NYC population in regards to race.
+
+Next we asked, what proportion of those hospitalized in NYC with
+COVID-19 in 2020 who died are Latino? (95% CI)
+
+```{r, warning=FALSE}
+DiedPatients <- COVID.df[COVID.df$Died == "Died", ]
+numDiedPatients <- nrow(DiedPatients)
+numDiedPatients
+
+diedLatinoPatients <- nrow(DiedPatients[DiedPatients$Race == "Latino",])
+diedLatinoPatients
+
+prop.test(x = diedLatinoPatients, n = numDiedPatients, correct = FALSE)
+```
+
+Though our dataset may not represent NYC as a whole, for a subset of NYC
+and the greater Westchester area, we can conclude with 95% confidence
+that the proportion of patients who died from COVID-19 in 2020 who are
+Latino is between 0.354 and 0.503.
+
+## Age
+
+Age is an important factor for many disease outcomes as the very young
+and very old tend to be more vulnerable populations. Because age is a
+variable we will use in later inferential statistical tests, we first
+use a QQ plot to assess further whether the age of patients in this
+cohort follows a normal distribution.
+
+```{r, warning=FALSE}
+# Create QQ plot of Age variable
+ggplot(COVID.df, aes(sample=Age.1)) +
+  stat_qq() + 
+  stat_qq_line() +
+  ggtitle("QQ Plot - Age") +
+  labs(x = "Theoretical Quantiles", y = "Data Quantiles") +
+  theme_bw()
+```
+
+Based on this QQ plot, although not completely normal, age has close to
+a normal distribution, deviating from normal at either ends of the
+spectrum (youngest and oldest). We further explored the distribution of
+patient ages with a histogram.
+
+```{r histogram_age, warning=FALSE}
+agek = ceiling(log2(length(COVID.df$Age.1))) + 1
+ 
+ ageMean = mean(COVID.df$Age.1)
+ ageMedian = median(COVID.df$Age.1)
+ 
+ histplot <- ggplot(data=COVID.df, aes(x=Age.1)) +
+   geom_histogram(bins = agek) +
+# plot mean in green
+   geom_vline(aes(xintercept=ageMean),col='green', show.legend = F) +
+   annotate("text", x=(ageMean)-9, y=70, label=substitute(paste(bar(x),"= ",m," years"),list(m=sprintf("%.01f",ageMean))),col='green') +
+# plot median in yellow
+   geom_vline(aes(xintercept=ageMedian),col='yellow', show.legend = F) +
+   annotate("text", x=(ageMedian)+8, y=70, label=substitute(paste(tilde(x),"= ",m," years"),list(m=sprintf("%.01f",ageMedian))),col="yellow") +
+   xlab("Age (Years)") +
+   ylab("Frequency") +
+   ggtitle("Histogram of Patient Ages")
+ histplot
+```
+
+We see that the mean age in the patient cohort is 65.2 years, and the
+median age is 66.0 years. Half of the patients are above age 66. There is
+at least one patient over the age of 100, and a small subset of young adult
+patients in their 20s and 30s.
+
+To compare the age distribution of our cohort to the greater NYC
+population, we asked: does the true proportion of NYC residents who were
+hospitalized and 75 years of age or older equal 0.2767, as is reported
+by the CDC [3]?
+
+COVID-19 hospitalization total in NYC in 2020: 54,211
+
+COVID-19 hospitalization total in NYC of those 75 years of age or older
+in 2020: 15,001
+
+Proportion of COVID-19 hospitalizations in NYC in 2020 who are 75 years
+of age or older: 15,001 / 54,211= 0.2767
+
+$$ \begin{aligned} H_0&: p = p_0 \\ &: \text{Proportion of patients hospitalized who are 75 or older = 0.2767} \\ H_1&: p \ne p_0 \\ &: \text{Proportion of patients hospitalized who are 75 or older} \ne 0.2767\\ \end{aligned} $$
+
+```{r, warning=FALSE}
+# Determine number of patients that are 75 or older
+over75 <- COVID.df[COVID.df$Age.1 >= 75, ]
+numOver75 <- nrow(over75)
+
+# Get total number of patients
+totalPatients <- nrow(COVID.df)
+
+prop.test(x = numOver75, n = totalPatients, p = 0.2767, correct = FALSE)
+```
+
+From the one-sample proportion test we get a p-value of 0.2296 which is
+greater than our significance level of 0.05, so we fail to reject the
+null hypothesis that the true proportion of NYC residents hospitalized
+in 2020 that are 75 or older equals 0.2767, as was reported by the CDC.
+While our sample may not represent the race distribution of NYC as a
+whole, it is more representative of the age distribution of NYC. 
+
+
+## Age and Race
+
+We next explored the relationship between age and race.
+
+```{r, warning=FALSE}
+# Age by race
+age.race.box <- ggplot(COVID.df, aes(x=Race, y=Age.1, fill=Race)) +
+  geom_boxplot() +
+  labs(title = "Age by Race", x = "Race", y = "Age (Years)") +
+  theme_bw()
+age.race.box
+```
+
+The median age across races is relatively similar with Asian and White
+individuals being slightly older compared to Blacks, Latinos, and those
+of unknown race. The IQRs of all races are between 50 and 80 years old,
+indicating the majority of individuals hospitalized for COVID-19 are in
+general older. However, there are several outliers indicating younger
+individuals being hospitalized for COVID-19 infection.
+
+We investigated if the mean age of COVID-19 patients differed by race
+using one-way ANOVA. Analyzing the boxplots above (age by race), we see
+the variance is roughly similar between each race.
+
+$H_0:$ Mean age is equal across races
+
+$H_1:$ Mean age is different for at least one race
+
+```{r, warning=FALSE}
+# Mean age by race
+age.race.anova <- aov(COVID.df$Age.1 ~ COVID.df$Race)
+summary(age.race.anova)
+```
+
+With a p-value of 0.0202, we reject the null hypothesis and conclude
+that the mean age of COVID-19 patients differs for at least one of the
+races included in this study. We further explored this using pairwise
+comparison and found that none of the individual races differed
+significantly in mean age at the bonferroni adjusted p-value of 0.005.
+
+$$\alpha^*=\frac{\alpha}{\binom{k}{2}}=\frac{0.05}{\binom{5}{2}}=0.005 $$
+
+```{r, warning=FALSE}
+# Pairwise comparison
+pairwise.t.test(COVID.df$Age.1, COVID.df$Race, p.adjust.method = "bonferroni")
+# Alpha*=0.005
+```
+
+These results contradict the ANOVA results, likely because bonferroni
+tends to be an overly stringent method of correction. It appears the
+difference in mean age dictated by ANOVA is between Whites and those of
+unknown race as this comparison harbors the lowest p-value from pairwise
+comparison of 0.048.
+
+Next, we used a two-sample t-test to ask if the mean age of patients who
+died is higher than those who lived.
+$$ H_{o}: \mu_{agedied} \leq\mu_{agealive}$$
+$$H_{1} : \mu_{agedied} > \mu_{agealive}$$
+
+```{r, warning=FALSE}
+# Generate variables for age by death status
+age_of_death <- died_data$Age.1
+age_of_alive <- alive_data$Age.1
+
+# Perform Welch's two sample t-test
+t.test(age_of_death,age_of_alive,alternative = "greater",paired = F,conf.level = 0.95,na.rm=T)
+```
+
+Using Welch's two sample t-test to compare the mean age of patients who
+lived and those who died, we get a p-value of $2.2*10^{-16}$ which is
+less than the significance level of $\alpha=0.05$. We reject the null
+hypothesis and conclude that the mean age of patients who died is
+greater than the mean age of patients who lived.
+
+## Comorbidities
+
+The presence of comorbidities (presence of additional disease) can
+complicate and often worsen a patient's prognosis. Of the comorbidities
+recorded, we chose to investigate chronic obstructive pulmonary disease
+(COPD), dementia, central nervous system (CNS) disorders, and peripheral
+vascular disease (PVD).
+
+```{r relativefrequencytables_comorbidities, warning=FALSE}
+# Comorbidities
+# Frequency table
+ComorbiditiesF <- factor(COVID.df$Comorbidities, levels=c("MI","PVD","CHF","CVD","DEMENT","COPD","DM, Complicated","DM, Simple","Renal disease","Any CNS Issue","Pure CNS Issue","Stroke","Seizure","Old Syncope","Unknown"))
+comorbid_AbsoluteTable <- table(ComorbiditiesF)
+comorb.df <- as.data.frame(comorbid_AbsoluteTable)
+colnames(comorb.df) <- c('Comorbidity', 'Cases')
+comorb.df
+```
+
+## COPD
+
+```{r, warning=FALSE}
+# Create absolute frequency bar chart for COPD status
+copd <- ggplot(COVID.df, aes(x=HasCOPD, fill=HasCOPD)) + 
+  geom_bar() + 
+  ylab("Count") +
+  xlab("COPD") +
+  ggtitle("Absolute Frequency - COPD") +
+  labs(fill = "COPD Diagnosis") +
+  theme_bw()
+# copd
+
+# Create relative frequency chart for COPD status
+copd + aes(y = after_stat(prop), group = 1, fill=factor(..x..)) + 
+  ylab("Relative Proportion") +
+  ggtitle("Relative Frequency - COPD") +
+  scale_fill_discrete(name = "COPD Diagnosis", labels = c("COPD", "No COPD")) +
+  theme_bw()
+```
+
+We created a relative frequency chart for COPD. From the
+chart, we see that very few of the hospitalized individuals have COPD.
+
+Next, we evaluated whether COPD & death from COVID-19 are associated. To
+perform this assessment, we used a chi-squared test of independence.
+
+$H_0:$ History of COPD and death from COVID-19 infection are independent
+
+$H_1:$ There is an association between history of COPD and death from
+COVID-19 infection
+
+```{r ChiSquared_Death_COPD, warning=FALSE}
+# Need to create a 2x2 table where rows are COPD (yes/no) and columns are COVID-19 death (yes/no)
+COPD_y_Death_y <- sum(died.df$COPD)
+COPD_n_Death_y <- length(died.df$COPD) - COPD_y_Death_y
+COPD_y_Death_n <- sum(lived.df$COPD)
+COPD_n_Death_n <- length(lived.df$COPD) - COPD_y_Death_n
+
+x <- matrix(c(COPD_y_Death_y, COPD_y_Death_n, COPD_n_Death_y, COPD_n_Death_n),nrow=2, ncol=2)
+x
+
+chisq.test(x,correct=F)
+```
+
+From the chi-squared test of independence we get a p-value of 0.9968. At
+the 0.05 significance level, we fail to reject the null hypothesis. We
+cannot conclude that there is an association between COPD and death from
+COVID-19 infection.
+
+## Dementia
+
+```{r, warning=FALSE}
+# Create absolute frequency bar chart for Dementia status
+dementia <- ggplot(COVID.df, aes(x=HasDement, fill=HasDement)) + 
+  geom_bar() + 
+  ylab("Count") +
+  xlab("Dementia") +
+  ggtitle("Absolute Frequency - Dementia") +
+  labs(fill = "Dementia Diagnosis") +
+  theme_bw()
+# dementia
+
+# Create relative frequency chart
+dementia + aes(y = after_stat(prop), group = 1, fill=factor(..x..)) + 
+  ylab("Relative Proportion") +
+  ggtitle("Relative Frequency - Dementia") +
+  scale_fill_discrete(name = "Dementia Diagnosis", labels = c("Dementia", "No Dementia")) +
+  theme_bw()
+```
+
+We next created a relative frequency chart for Dementia. The
+chart shows that only a very small portion of the patients have
+dementia - less than 10%.
+
+We then evaluated whether dementia & death from COVID-19 are associated.
+
+$H_0:$ History of dementia and death from COVID-19 infection are
+independent
+
+$H_1:$ There is an association between history of dementia and death
+from COVID-19 infection
+
+```{r ChiSquared_Death_Dementia, warning=FALSE}
+# Need to create a 2x2 table where rows are Dementia (yes/no) and columns are COVID-19 death (yes/no)
+Dem_y_Death_y <- sum(died.df$DEMENT)
+Dem_n_Death_y <- length(died.df$DEMENT) - Dem_y_Death_y
+Dem_y_Death_n <- sum(lived.df$DEMENT)
+Dem_n_Death_n <- length(lived.df$DEMENT) - Dem_y_Death_n
+
+x <- matrix(c(Dem_y_Death_y, Dem_y_Death_n, Dem_n_Death_y, Dem_n_Death_n),nrow=2, ncol=2)
+x
+
+chisq.test(x,correct=F)
+```
+
+The chi-squared test of independence comparing dementia and death from
+COVID-19 infection returns a p-value of 0.2486. At the 0.05 significance
+level we fail to reject the null hypothesis. We cannot conclude that
+there is an association between dementia and death from COVID-19
+infection.
+
+## Central Nervous System Comorbidities
+
+We next explored central nervous system (CNS) comorbidities and their
+potential role in COVID-19 outcomes.
+
+We asked, does the proportion of patients with CNS comorbidities differ
+between the patients who died versus the patients who lived?
+$$ H_{o}: p_{CNSdied} = p_{CNSalive}$$
+$$H_{1}: p_{CNSdied} \neq p_{CNSalive}$$
+
+```{r, warning=FALSE}
+# Filter the data for individuals who have died
+CNS_died <-died_data$All.CNS
+CNS_alive <- alive_data$All.CNS
+
+# Generate proportions of those with CNS comorbidites by death status
+CNS_died_proportion<-sum(CNS_died)/length(CNS_died)
+CNS_alive_proportion <- sum(CNS_alive)/length(CNS_alive)
+
+# Run a two-sample proportion test
+prop.test(x = c(sum(CNS_died == 1), sum(CNS_alive == 1)),
+                              n = c(length(CNS_died), length(CNS_alive)),
+                              conf.level = 0.95,
+                              alternative = "two.sided")
+```
+
+The two-sample proportion test returns a p-value of 0.0013. At the 0.05
+significance level we reject the null hypothesis and conclude that the
+proportion of patients with neurological comorbidities does differ
+between those who died and those who lived.
+
+## Peripheral Vascular Disease
+
+Finally, we evaluated whether history of peripheral vascular disease &
+death from COVID-19 are associated.
+
+$H_0:$ History of peripheral vascular disease and death from COVID-19
+infection are independent
+
+$H_1:$ There is an association between history of peripheral vascular
+disease and death from COVID-19 infection
+
+```{r ChiSquared_Death_PVD, warning=FALSE}
+# Need to create a 2x2 table where rows are PVD (yes/no) and columns are COVID-19 death (yes/no)
+PVD_y_Death_y <- sum(died.df$PVD)
+PVD_n_Death_y <- length(died.df$PVD) - PVD_y_Death_y
+PVD_y_Death_n <- sum(lived.df$PVD)
+PVD_n_Death_n <- length(lived.df$PVD) - PVD_y_Death_n
+
+x <- matrix(c(PVD_y_Death_y, PVD_y_Death_n, PVD_n_Death_y, PVD_n_Death_n),nrow=2, ncol=2)
+x
+
+chisq.test(x,correct=F)
+```
+
+From the chi-squared test of independence we get a p-value of 0.3923. At
+the 0.05 significance level we fail to reject the null hypothesis. We
+cannot conclude that there is an association between history of
+peripheral vascular disease and death from COVID-19 infection.
+
+# Part II: Disease Outcomes
+
+We next explored disease outcomes of those infected with COVID-19.
+The disease outcomes we assessed were disease severity, length of stay in the
+hospital, and death.
+
+## Disease Severity
+
+In this section, we explored the relationships between demographic
+factors and disease severity, utilizing a severity score designed and
+calculated by the physicians who curated the dataset. The severity score was 
+computed for each patient as a function of their age, oxygen saturation,
+blood pressure, blood urea nitrogen, c-reactive protein, and INR (an indicator
+of blood clotting time). 
+
+```{r, warning=FALSE}
+# Create vector with severity orders
+severity_order <- c('0', '1', '2', '3', '4', '5', '6','7', '8', '9', '10', '11')
+
+# Create absolute frequency bar chart for severity
+severity <- ggplot(COVID.df, aes(x=factor(Severity, severity_order), fill= factor(Severity))) +
+  geom_bar() +
+  ylab("Count") +
+  xlab("Severity Score (0-11)") +
+  ggtitle("Absolute Frequency - Severity") +
+  labs(fill = "Severity Score") +
+  theme_bw()
+ severity 
+```
+
+The above chart shows that the majority of patients had lower severity
+cases of COVID-19 (0-5).
+
+```{r, warning=FALSE}
+# Severity score by race
+ss.race.box <- ggplot(COVID.df, aes(x=Race, y=Severity, fill=Race)) +
+  geom_boxplot() +
+  labs(title = "COVID-19 Severity Score by Race", x = "Race", y = "Severity Score (0-11)") +
+  theme_bw()
+ss.race.box
+```
+
+When comparing the COVID-19 severity score across races, we see a fairly
+constant median severity score of approximately 4 for each race. Both
+the Black and White race categories have slightly larger IQRs compared
+to the other races. The Latino race has two outliers, indicating
+individuals with much higher severity scores compared to other Latinos.
+
+We are interested in whether the COVID-19 severity score differs by
+race. To explore this, we conducted a one-way ANOVA. Analyzing the
+boxplots above (severity score by race), we see the variance is fairly
+equal between each race.
+
+$H_0:$ All means are equal
+
+$H_A:$ The mean severity score of at least one race differs from the
+other races
+
+```{r, warning=FALSE}
+# Mean severity score by race
+ss.race.anova <- aov(COVID.df$Severity ~ COVID.df$Race)
+summary(ss.race.anova)
+```
+
+With a p-value of 0.302, at the alpha level of 0.05, we fail to reject
+the null hypothesis and conclude that mean COVID-19 severity score does
+not differ by race.
+
+## Death from SARS-CoV-2
+
+```{r, warning=FALSE}
+# Create absolute frequency bar chart for survival status
+death <- ggplot(COVID.df, aes(x=Died, fill=Died)) +
+  geom_bar() +
+  ylab("Count") +
+  xlab("Survival Status") +
+  ggtitle("Absolute Frequency - Survival Status") +
+  labs(fill="Survival") +
+  theme_bw()
+# death 
+
+# Create relative frequency chart
+death + aes(y = after_stat(prop), group = 1, fill=factor(..x..)) + 
+  ylab("Relative Proportion") +
+  ggtitle("Relative Frequency - Survival Status") +
+  scale_fill_discrete(name = "Survival", labels = c("Died", "Lived")) +
+  theme_bw()
+```
+
+In total, about 20% of patients hospitalized due to Sars-CoV-2 infection
+in this cohort died during the course of their hospital stay.
+
+```{r, warning=FALSE}
+# Age by death
+age.died.box <- ggplot(COVID.df, aes(x=Died, y=Age.1, fill=Died)) +
+  geom_boxplot() +
+  labs(title = "Age by Survival Status", x = "Survival Status", y = "Age (Years)") +
+  scale_fill_discrete(name = "Survival") +
+  theme_bw()
+age.died.box
+```
+
+The median age of those who died is greater than the median age of those
+who lived by about 10 years. Of note, there are a few outliers in the
+'Died' category indicating younger individuals between 25 and 45 who
+died of COVID-19.
+
+```{r, warning=FALSE}
+# Severity score by death
+ss.death.box <- ggplot(COVID.df, aes(x=Died, y=Severity, fill=Died)) +
+  geom_boxplot() +
+  labs(title = "COVID-19 Severity Score by Survival Status", x = "Survival Status", y = "Severity Score (0-11)") +
+  scale_fill_discrete(name = "Survival") +
+  theme_bw()
+ss.death.box 
+```
+
+The median severity score among those who died was greater than the
+median severity score for those who lived.
+
+A normal oxygen saturation level for a healthy individual is 95%. Given
+COVID-19 is a disease affecting the lungs, we next explored the role of
+oxygen saturation among the individuals in this cohort.
+
+```{r, warning=FALSE}
+# Age by oxygen saturation
+age.o2.scat <- ggplot(COVID.df, aes(x=Age.1, y=OsSats)) +
+  geom_point( colour = "blue") +
+  geom_smooth(method = "lm", se = FALSE, col = "orange") +
+  labs(title = "Oxygen Saturation by Age", x="Age (Years)", y = "Oxygen Saturation (%)") +
+  theme_bw()
+age.o2.scat
+# Covariance
+age.o2.cov <- cov(COVID.df$Age.1, COVID.df$OsSats, use = "everything", method = "pearson")
+age.o2.cov
+# Correlation
+age.o2.cor <- cor(COVID.df$Age.1, COVID.df$OsSats, method = "pearson")
+age.o2.cor
+```
+
+From the scatter plot, we see that oxygen saturation levels remain
+relatively constant across age; however, several individuals record low
+O2 saturation levels. The covariance between oxygen saturation and age
+in years is 2.238 indicating a slight positive correlation between the
+two variables. However, the scatter plot indicates no strong association
+between the two variables.
+
+Exploring the role of oxygen saturation further, we investigated the
+spread of oxygen saturation among individuals who died and those who
+lived.
+
+```{r, warning=FALSE}
+# Oxygen saturation by survival
+o2.died.box <- ggplot(COVID.df, aes(x=Died, y=OsSats, fill=Died)) +
+  geom_boxplot() +
+  labs(title = "Oxygen Saturation Level by Survival Status", x = "Survival Status", y = "Oxygen Saturation (%)") +
+  scale_fill_discrete(name = "Survival") +
+  theme_bw()
+o2.died.box
+```
+
+The median oxygen saturation level is slightly lower among individuals
+who died compared to those who lived. Most interestingly are the
+outliers indicating a few individuals who died with oxygen saturation
+levels between 35% and 60%, where the normal oxygen saturation level
+should be around 95%.
+
+## Length of Stay
+
+There are several factors that can contribute to an individual patient's
+length of stay in the hospital when infected with COVID-19. We sought to
+explore which variables are most likely to contribute to extended
+hospital stays.
+
+```{r, warning=FALSE}
+# LOS by death
+los.died.box <- ggplot(COVID.df, aes(x=Died, y=LOS, fill=Died)) +
+  geom_boxplot() +
+  labs(title = "Length of Stay by Survival Status", x = "Survival Status", y = "Length of Stay (Days)") +
+  scale_fill_discrete(name = "Survival") +
+  theme_bw()
+los.died.box
+```
+
+The length of stay did not differ substantially between individuals who
+lived and died. Among those who lived, there were several
+outliers with longer stays compared to those who died.
+
+```{r, warning=FALSE}
+# LOS by race
+los.race.box <- ggplot(COVID.df, aes(x=Race, y=LOS, fill=Race)) +
+  geom_boxplot() +
+  labs(title = "Length of Stay by Race", x = "Race", y = "Length of Stay (Days)") +
+  theme_bw()
+los.race.box
+```
+
+The median length of stay does not differ much by race. However, there
+are several outliers with longer stays among Blacks, Latinos, and those
+of unknown race when compared to Asians and Whites.
+
+```{r, warning=FALSE}
+# Length of stay (LOS) by age
+los.age.scat <- ggplot(COVID.df, aes(x=Age.1, y=LOS)) +
+  geom_point( colour = "blue") +
+  geom_smooth(method = "lm", se = FALSE, col = "orange") +
+  labs(title = "Length of Stay by Age", x="Age (Years)", y = "Length of Stay (Days)") +
+  theme_bw()
+los.age.scat
+# Covariance
+los.age.cov <- cov(COVID.df$Age.1, COVID.df$LOS, use = "everything", method = "pearson")
+los.age.cov
+# Correlation
+los.age.cor <- cor(COVID.df$Age.1, COVID.df$LOS, method = "pearson")
+los.age.cor
+```
+
+Covariance between length of stay and age is -0.243 indicating a very
+slight negative relationship between the two variables. Given the
+covariance is so close to zero, we can conclude there is no real
+association between the length of stay and age of individuals. This
+conclusion is supported by the scatter plot showing a near horizontal
+line of best fit between the two variables.
+
+To further explore length of stay and age, we looked at the relationship
+using age groups rather than a continuous age variable.
+
+```{r, warning=FALSE}
+# LOS by age group
+# Create vector with age order
+age_order <- c("0-60", ">60", ">70", ">80")
+los.age.box <- ggplot(COVID.df, aes(x=factor(Age, age_order), y=LOS, fill=Age)) +
+  geom_boxplot() +
+  labs(title = "Length of Stay by Age Group", x = "Age Group", y = "Length of Stay (Days)") +
+  theme_bw()
+los.age.box
+```
+
+Those in the 0-60 age group appear to have a slightly lower median
+length of stay compared to the other age groups, but also contain an
+outlier with the longest length of stay. Median length of stay is
+slightly greater for the over 80 age group compared to the other three
+age groups.
+
+# Part III: Inferential Statistics of Clinical Characteristics
+
+Finally, we performed several inferential statistical tests to determine
+which clinical characteristics were indicative of worse COVID-19
+prognoses.
+
+The following table provides summary statistics for patient age and four
+common clinical characteristics: body temperature, MAP (Mean Arterial
+Pressure, a measure of blood pressure), D-dimer (a measure of blood
+clotting), and white blood cell count (an indication of a heightened
+immune response).
+
+```{r, warning=FALSE}
+# Generate a dataframe of summary statistics 
+summary_stats <- data.frame(
+  mean = round(sapply(COVID.df[, c('Temp', 'Age.1', 'Ddimer', 'MAP', 'WBC')], mean, na.rm = TRUE),2),
+  median = round(sapply(COVID.df[, c('Temp', 'Age.1', 'Ddimer', 'MAP', 'WBC')], median, na.rm = TRUE),2),
+  trimmed_mean = round(sapply(COVID.df[, c('Temp', 'Age.1', 'Ddimer', 'MAP', 'WBC')], mean, trim = 0.1, na.rm = TRUE),2),
+  IQR = round(sapply(COVID.df[, c('Temp', 'Age.1', 'Ddimer', 'MAP', 'WBC')], IQR, na.rm = TRUE),2),
+  variance = round(sapply(COVID.df[, c('Temp', 'Age.1', 'Ddimer', 'MAP', 'WBC')], var, na.rm = TRUE),2),
+  coefficient_of_variation = round(sapply(COVID.df[, c('Temp', 'Age.1', 'Ddimer', 'MAP', 'WBC')], function(x) sd(x, na.rm = TRUE) / mean(x, na.rm = TRUE)),2),
+  skewness = round(sapply(COVID.df[, c('Temp', 'Age.1', 'Ddimer','MAP', 'WBC')], psych::skew),2)
+)
+
+# Rename the rows and columns
+rownames(summary_stats) <- c('Temperature (C)','Age (yrs)', 'D-dimer (mg/L FEU)', 'MAP (mmHg)', 'WBC (× 10^9/L)')
+colnames(summary_stats) <- c('Mean', 'Median', 'Trimmed mean', 'IQR', 'Variance', 'Coefficient of variation', 'Skewness')
+
+# View the summary statistics dataframe
+sum_stats <- t(summary_stats)
+sum_stats
+```
+
+## Inferential Questions about Temperature
+
+Given that SARS-CoV-2 infection is known to induce fever, we sought to
+characterize the role of temperature among this cohort of hospitalized
+individuals with COVID-19.
+
+```{r, warning=FALSE}
+# Create a qq plot of temperature data
+ggplot(COVID.df, aes(sample=Temp)) +
+  stat_qq() + 
+  stat_qq_line() +
+  ggtitle("QQ Plot - Temperature") +
+  labs(x = "Theoretical Quantiles", y = "Data Quantiles") +
+  theme_bw()
+```
+
+We created a quantile plot for the variable temperature to see if it is
+normally distributed. The plot shows although not completely normal,
+temperature has a close to normal distribution for the sample
+population, deviating from normal at either end of the spectrum -
+especially the low end. We further assessed normality using a histogram.
+
+```{r, warning=FALSE}
+# Create a histogram with the temperature data
+histogram <- ggplot(data = COVID.df, aes(x = Temp)) +
+  geom_histogram(bins = ceiling(log2(length(COVID.df$Temp))) + 1, fill = "lightblue") +
+  ggtitle("Patient Temperature") +
+  labs(x = "Temperature (Celsius)", y = "Count") +
+  theme_bw()
+histogram
+```
+
+Since temperature is right skewed, we applied a box-cox transformation
+to normalize the data.
+
+```{r, warning=FALSE}
+# Assess skew of temperature data--positively skewed
+skewness(COVID.df$Temp)
+```
+
+```{r, warning=FALSE}
+# Applying box cox transformation.
+prices <- COVID.df$Temp
+plo <-boxcox(prices~1)
+invisible(plo)
+
+ss <- plo$x[plo$y == max(plo$y)]
+ss
+
+r_val <- round(ss,digits=4)
+ x<- COVID.df$Temp
+ bc.temp <- (x^r_val-1)/r_val
+ summary(bc.temp)
+```
+
+```{r, warning=FALSE}
+# Histogram of transformed data
+attr(cars,"bc_data") <- bc.temp
+bc_data <- attr(cars,"bc_data")
+COVID.df$bc_trans_data <- bc_data
+aa <- ggplot(data=COVID.df,aes(x=bc_trans_data))
+b <- aa+geom_histogram(bins=9,color = 2,fill="lightblue")
+cc<-b+ggtitle("Temperature Distribution after Box-cox Transformation") +
+  labs(x = "Box-cox Transformed Temperature", y = "Count") +
+  theme_bw()
+cc
+```
+
+After applying a box-cox transformation, we can see the data more
+closely follows a normal distribution.
+
+Next, we compared the mean temperatures of patients who died from
+COVID-19 to those who lived.
+
+$$ H_{o}: \mu_{tempdied} = \mu_{tempalive}$$
+
+$$H_{1} : \mu_{tempdied} \neq \mu_{tempalive}$$
+
+```{r, warning=FALSE}
+# Extract temperature data of people who have died
+temp_of_died <- died_data$Temp
+
+# Display temperature data of people who have died
+temp_of_alive <- alive_data$Temp
+
+# Run two sample t-test to compare temperatures
+t.test(temp_of_died,temp_of_alive,alternative = "two.sided",paired = F,conf.level = 0.95)
+```
+
+Using Welch's two sample t-test to compare temperature between patients
+who died from COVID-19 to those who lived, we get a p-value of 0.0740.
+At the 0.05 significance level, we fail to reject the null hypothesis
+and conclude that the temperatures between those who died and those who
+lived does not differ.
+
+To further explore the temperature variable, we looked at the
+correlation of temperature and age.
+
+$$ \begin{aligned} H_0&: \rho = 0 \\ &: \text{Age and Temperature of Patients are not correlated} \\ H_1&: \rho \ne 0 \\ &: \text{Age and Temperature of Patients are correlated} \\ \end{aligned} $$
+
+```{r, warning=FALSE}
+# Specify variables to use
+age <- COVID.df$Age.1
+
+# Use Box Cox transformed data from earlier
+temp <- bc.temp
+
+# Perform correlation test
+cor.test(age,temp,method = "spearman", exact = FALSE)
+```
+
+From the Spearman rank correlation test we get a p-value of 0.0001 which
+is less than our alpha value of 0.05, so we reject the null hypothesis
+and conclude that there is a correlation between age and temperature of
+patients.
+
+## Inferential Questions about WBCs
+
+```{r, warning=FALSE}
+# Create qq plot
+ggplot(COVID.df, aes(sample=WBC)) +
+  stat_qq() + 
+  stat_qq_line() +
+  ggtitle("QQ Plot - White Blood Cells (WBC)") +
+  labs(x = "Theoretical Quantile", y = "Data Quantile") +
+  theme_bw()
+```
+
+We created a quantile plot for White Blood Cell count to check the
+normality of the distribution of WBC data. The plot shows that although
+not completely normal, WBC has a mostly normal distribution for the
+sample population, deviating from normal at the high end of the spectrum
+indicating a right skew.
+
+Next, we looked at the relationship between age and WBC of the COVID-19
+patients to see if the two variables are correlated.
+
+$$ \begin{aligned} H_0&: \rho = 0 \\ &: \text{Age and WBC of Patients are not correlated} \\ H_1&: \rho \ne 0 \\ &: \text{Age and WBC of Patients are correlated} \\ \end{aligned} $$
+
+We first perform a box-cox transformation of the WBC data to ensure
+normality.
+
+```{r, warning=FALSE}
+# Box Cox Transformation of WBC
+bc <- boxcox(COVID.df$WBC ~ 1)
+lamda <- bc$x[bc$y==max(bc$y)]
+lamda <- round(lamda, digits = 4)
+bc.wbc <- (COVID.df$WBC ^ lamda - 1) / lamda
+
+# Perform correlation test using age and transformed WBC
+cor.test(age,bc.wbc,method = "spearman", exact = FALSE)
+```
+
+From the Spearman rank correlation test, the p-value is 0.1942 which is
+greater than our alpha value of 0.05, so we fail to reject the null
+hypothesis and conclude that age and WBC are not correlated.
+
+## Inferential questions about D-dimer
+
+D-dimer is used to assess clotting in patients. We first examined this
+variable to see if it is normally distributed in our cohort of COVID-19
+patients.
+
+```{r, warning=FALSE}
+# Create qq plot
+ggplot(COVID.df, aes(sample=Ddimer)) +
+  stat_qq() + 
+  stat_qq_line() +
+  ggtitle("QQ Plot - D-Dimer") +
+  labs(x = "Theoretical Quantile", y = "Data Quantile") +
+  theme_bw()
+```
+
+The quantile plot shows that the D-Dimer data from the sample population
+does not follow a normal distribution. We further explored the skewed
+D-dimer data using a histogram.
+
+```{r, warning=FALSE}
+# Check histogram of D-dimer
+histogram <- ggplot(data = COVID.df, aes(x = Ddimer)) +
+  geom_histogram(bins = ceiling(log2(length(COVID.df$Ddimer))) + 1, fill = "lightblue") +
+  ggtitle("Patient D-dimer") +
+  labs(x = "D-dimer", y = "Count") +
+  theme_bw()
+histogram
+```
+
+Since the data is very right skewed, we applied a box-cox transformation
+to get a more normal distribution.
+
+```{r, warning=FALSE}
+# Assess skewness of Ddimer
+skewness(COVID.df$Ddimer)
+```
+
+```{r, warning=FALSE}
+# Perform box-cox transformation on Ddimer
+prices <- COVID.df[COVID.df$Ddimer>0,]$Ddimer
+plo <-boxcox(prices~1)
+invisible(plo)
+
+ss <- plo$x[plo$y == max(plo$y)]
+ss
+
+r_val <- round(ss,digits=4)
+ x<- COVID.df$Ddimer
+ bc.ddimer <- (x^r_val-1)/r_val
+ summary(bc.ddimer)
+```
+
+```{r, warning=FALSE}
+# Create histogram of box-cox transformed D-dimer data
+attr(cars,"bc_data") <- bc.ddimer
+bc_data <- attr(cars,"bc_data")
+COVID.df$bc_trans_data <- bc_data
+aa <- ggplot(data=COVID.df,aes(x=bc_trans_data))
+b <- aa+geom_histogram(bins=9,color = 2,fill="lightblue")
+cc<-b+ggtitle("D-dimer Distribution after Box-cox Transformation") +
+  labs(x = "Box-cox transfromed D-dimer", y = "Count") +
+  theme_bw()
+cc
+```
+
+After transforming the data we sought to answer the question, does the
+mean D-dimer level differ between patients who died and patients who
+survived?
+
+$$ H_{o}: \mu_{tempdied} \leq \mu_{tempalive}$$
+$$H_{1} : \mu_{tempdied} > \mu_{tempalive}$$
+
+```{r, warning=FALSE}
+# Filter the data for individuals who have died
+died_data <- subset(COVID.df, Death == 1)
+
+# Extract Ddimer data of people who have died
+Ddimer_of_died <- died_data$Ddimer
+
+# Display Ddimer data of people who have died
+alive_data <- subset(COVID.df, Death == 0)
+Ddimer_of_alive <- alive_data$Ddimer
+
+# Run a two sample t-test to compare Ddimer between those who lived and died
+t.test(Ddimer_of_died,Ddimer_of_alive,alternative = "greater",conf.level = 0.95,paired  = F)
+```
+
+Using Welch's two sample t-test, we get a p-value of $5.382*10^{-6}$. At
+the 0.05 significance level, we reject the null hypothesis and conclude
+that the D-Dimer values are greater among people who died than those who
+survived.
+
+## Inferential questions about blood pressure
+
+Blood pressure is an important clinical measure for assessing heart
+health and function, as well as systemic stress including whether a patient is 
+in septic shock. We sought to answer the question, is the variance
+of blood pressure (mean arterial pressure) higher in the group that died
+than the group that lived?
+
+$$ H_{o}: \sigma_{MAPdied} \leq \sigma_{MAPalive}$$
+$$H_{1} : \sigma_{MAPdied} > \sigma_{MAPalive}$$
+
+```{r variance_MAP, warning=FALSE}
+# Plot histogram of MAP for those who died
+map_D_k = ceiling(log2(length(died.df$MAP))) + 1
+
+histplot <- ggplot(data=died.df, aes(x=MAP)) +
+  geom_histogram(bins = map_D_k) +
+  xlab("MAP (mmHg)") +
+  ylab("Frequency") +
+  ggtitle("Histogram of MAP for Patients who Died") +
+  theme_bw()
+histplot
+
+# Plot histogram of MAP for those who lived
+map_L_k = ceiling(log2(length(lived.df$MAP))) + 1
+
+histplot <- ggplot(data=lived.df, aes(x=MAP)) +
+  geom_histogram(bins = map_D_k) +
+  xlab("MAP") +
+  ylab("Frequency") +
+  ggtitle("Histogram of MAP for Patients who Lived") +
+  theme_bw()
+histplot
+
+# Observe that MAP is relatively normally distributed in both samples.
+
+# Note that the F test requires the two populations to be normally distributed
+var.test(died.df$MAP,lived.df$MAP, alternative="greater")
+```
+
+The F test provides a p value of $<2.2*10^{-16}$, which is less than our alpha
+of 0.5. Therefore, we conclude the variance in mean arterial pressure is 
+significantly greater among the patients who died compared to the patients who 
+lived. This may reflect, among the patients who died, a less stable underlying 
+physiological state and a reduced ability to compensate effectively for various
+physiologic stressors that impact blood pressure. 
+
+## Linear Regression to Predict Length of Stay
+
+```{r, warning=FALSE}
+#Predict length of stay using age, D-dimer, MAP, oxygen saturation, and temperature
+covid.lm <- lm(COVID.df$LOS ~ COVID.df$Age.1 + COVID.df$Ddimer + COVID.df$MAP + COVID.df$Temp + COVID.df$OsSats)
+summary(covid.lm)
+```
+
+Using multiple linear regression, we sought to evaluate the ability to
+predict a patient's length of stay based on their age and the following
+clinical measures: D-dimer, MAP, temperature, and oxygen saturation
+level. From the model, our estimated regression line is
+$\hat{y}=4.249-0.006x_1+0.136x_2-0.017x_3+0.432x_4-0.125x_5$. Of the
+predictor variables used, D-dimer, temperature, and oxygen saturation
+had significant p-values. Overall, the model has negligent predictive
+capability with an adjusted $R^2$ of 0.045. This is surprising as we
+would expect the combination of these clinical markers and age to be
+indicative of how long a patient would stay hospitalized for COVID-19.
+
+# Discussion
+
+Our analyses provided both expected and surprising results. In Part I,
+we investigated the demographics of our patient cohort. By comparing the
+demographics of this cohort with the demographics reported by the CDC
+for patients in New York City as a whole, we conclude that the patient
+populations of these four hospitals from which our data is drawn are not
+in fact representative of the entire patient population of New York City
+during the early days of the COVID-19 pandemic. Specifically, our
+patient cohort contains a larger proportion of Black and Latino
+patients. Nevertheless, the ages of our patient cohort are
+representative of patients in NYC as a whole. Taken together, these findings 
+could motivate hypotheses for further study, including (1) is the distribution 
+of ages of residents in the communities surrounding these hospitals more 
+similar to the distribution of ages in all of NYC as compared to the distribution 
+of races?, and, (2) does SARS-CoV-2 selectively cause hospitalization-necessitating 
+disease in older individuals, while being less or not at all selective on the 
+basis of race? Answering these questions would require expanding the study 
+population beyond the hospital setting to survey individuals living in the 
+community. 
+
+Several different comorbidities were reported among this patient cohort.
+Surprisingly, neither COPD nor peripheral vascular disease were
+associated with patient death from COVID-19. Additionally, while
+dementia alone was not associated with patient death, there was an
+association between all central nervous system disorders and patient
+death from COVID-19.
+
+We could not accurately represent the relationship between age and
+COVID-19 severity score as age was a heavily weighted factor in
+calculating severity score for these patients. Rather, we investigated
+the effect of race on severity score and found that there was no
+difference in severity score when broken down by the five different
+races represented in this study (Asian, Black, Latino, White, and
+unknown). Unsurprisingly, both age and severity score were higher among
+those who died compared to those who lived, while length of stay in the
+hospital was rather evenly distributed among patients who lived and
+patients who died from COVID-19.
+
+We explored the impact of several different clinical characteristics on
+survival status among this cohort of patients. First, looking at
+temperature, we saw no difference in body temperature between patients
+who lived and died. We next investigated the measure of blood clotting,
+as measured by D-dimer levels, and found that D-dimer levels were higher in 
+patients who died from COVID-19 than those who did not die. This finding is 
+consistent with evidence that emerged in the first year of the pandemic that 
+many patients with Sars-CoV-2 were experiencing frequent clotting 
+events such as venous thromboembolism (when a clot forms in the venous system and 
+dislodges to later lodge in the lungs and block blood oxygenation) and 
+disseminated intravascular coagulation (in which small clots form in many small 
+blood vessels around the body). This evidence was important for guiding the 
+clinical standard of care, which now includes prophylatic anticoagulation for 
+certain populations of individuals hospitalized with SARS-CoV-2 infection [4]. 
+Lastly, we looked at blood pressure and found greater variance in blood pressure 
+among those who died compared to those who lived. This may reflect a state of 
+physiological decompensation among these patients which puts the patient's life 
+at risk. Causes of dysregulated blood pressure which may happen during SARS-CoV-2
+infection include septic shock, which occurs when the body's immune system 
+generates a hyperactive response to the viral pathogen and which is 
+life-threatening. Changes in blood pressure can also be seen accompanying acute 
+respiratory distress syndrome, a serious complication of COVID-19 in which the
+lungs flood with fluid, and which is associated with with a high mortality rate. 
+We were unable to accurately predict length of stay using a suite of clinical 
+characteristics, indicating that early strains of COVID-19 
+were complex and somewhat unpredictable in their clinical impact.
+
+# Conclusion
+
+We investigated clinical outcomes for 819 individuals hospitalized with
+COVID-19 early in the pandemic,and found that in early 2020 COVID-19
+infected people from all racial backgrounds while tending to cause more
+deaths among older individuals. Of the clinical characteristics
+measured, blood pressure and D-dimer differed among those who died from
+COVID-19 compared to those who lived, while temperature and WBC did not.
+Overall, this dataset provides valuable insight into the clinical
+outcomes of early COVID-19 in an urban US-based population.
+
+# Sources
+
+[1] "COVID-19: Data: Trends and Totals." Last updated December 7, 2023.
+<https://www.nyc.gov/site/doh/covid/covid-19-data-totals.page>
+
+[2] Altschul, David (2021). Neurologic complications of COVID-19
+[Dataset]. Dryad. <https://doi.org/10.5061/dryad.7d7wm37sz>
+
+[3] "Morbidity and Mortality Weekly Report: COVID-19 Outbreak -- New
+York City, February 29-June 1, 2020." Centers for Disease Control and
+Prevention. <https://www.cdc.gov/mmwr/volumes/69/wr/mm6946a2.htm>
+
+[4] "Antithrombotic Therapy in Patients with COVID-19." COVID-19 Treatment 
+Guidelines. National Institute of Health. Last updated October 10, 2023. https://www.covid19treatmentguidelines.nih.gov/therapies/antithrombotic-therapy/ 
